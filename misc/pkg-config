@@ -1,0 +1,146 @@
+#!/usr/bin/env python3.13
+
+import sys
+from datetime import datetime
+from pathlib import Path
+
+CURRENT_DIR = Path(__file__).parent
+PROJECT_DIR = CURRENT_DIR.parent
+BUILD_DIR = PROJECT_DIR / "build"
+OPENSSL_ROOT = BUILD_DIR / "openssl"
+LIBSSH2_ROOT = BUILD_DIR / "libssh2"
+PKG_CONFIG_TRACE = Path("/tmp/pkg_config_trace")
+
+
+KNOWN_PACKAGES = {"openssl": OPENSSL_ROOT, "libssh2": LIBSSH2_ROOT}
+
+
+def modversion(package: str) -> tuple[int, object]:
+    packages = {"openssl": "3.0.16", "libssh2": "1.11.2"}
+    if package not in packages:
+        return 1, None
+
+    return 0, packages[package]
+
+
+def variable(package: str, var: str) -> tuple[int, object]:
+    if package not in KNOWN_PACKAGES:
+        return 1, None
+
+    path = KNOWN_PACKAGES[package]
+
+    match var:
+        case "prefix":
+            return 0, path
+        case "includedir":
+            return 0, path / "include"
+        case "libdir":
+            return 0, path / "lib"
+
+    return 1, None
+
+
+def libs(package: str, **flags: bool) -> tuple[int, object]:
+    packages = {
+        "openssl": {"l": "-lssl -lcrypto", "L": f"-L{OPENSSL_ROOT / "lib"}"},
+        "libssh2": {
+            "l": "-lssh2 -lssl -lcrypto",  # skipping -lz to work around a libgit2 cmake bug
+            "L": (
+                f"-L{LIBSSH2_ROOT / "lib"}"
+                f" -L{OPENSSL_ROOT / "lib"}"
+            ),
+        },
+    }
+
+    if package not in packages:
+        return 1, None
+
+    result = packages[package]
+
+    args = []
+    for flag, enabled in flags.items():
+        if enabled and result.get(flag):
+            args.append(result[flag])
+    return 0, " ".join(args)
+
+
+def cflags(package: str, **flags: bool) -> tuple[int, object]:
+    packages = {
+        "openssl": {"I": f"-I{OPENSSL_ROOT / "include"}"},
+        "libssh2": {
+            "I": (
+                f"-I{LIBSSH2_ROOT / "include"}"
+                f" -I{OPENSSL_ROOT / "include"}"
+            )
+        },
+    }
+
+    if package not in packages:
+        return 1, None
+
+    result = packages[package]
+
+    args = []
+    for flag, enabled in flags.items():
+        if enabled and result.get(flag):
+            args.append(result[flag])
+    return 0, " ".join(args)
+
+
+def deal_with_it(argv: list[str]) -> tuple[int, object]:
+    match argv:
+        case ["--version"]:
+            return 0, "2.5.666"
+        case ["--print-errors", "--short-errors", "--exists", package]:
+            if package in KNOWN_PACKAGES:
+                return 0, None
+            return 1, f"Package {package!r} not found"
+        case ["--modversion", package]:
+            return modversion(package)
+        case ["--variable=prefix", package]:
+            return variable(package, "prefix")
+        case ["--variable=includedir", package]:
+            return variable(package, "includedir")
+        case ["--variable=libdir", package]:
+            return variable(package, "libdir")
+        case ["--libs-only-l", package]:
+            return libs(package, l=True)
+        case ["--static", "--libs-only-l", package]:
+            return libs(package, l=True)
+        case ["--libs-only-L", package]:
+            return libs(package, L=True)
+        case ["--static", "--libs-only-L", package]:
+            return libs(package, L=True)
+        case ["--libs-only-other", package]:
+            return libs(package, other=True)
+        case ["--static", "--libs-only-other", package]:
+            return libs(package, other=True)
+        case ["--libs", package]:
+            return libs(package, L=True, l=True, other=True)
+        case ["--static", "--libs", package]:
+            return libs(package, L=True, l=True, other=True)
+        case ["--cflags-only-I", package]:
+            return cflags(package, I=True)
+        case ["--static", "--cflags-only-I", package]:
+            return cflags(package, I=True)
+        case ["--cflags-only-other", package]:
+            return cflags(package, other=True)
+        case ["--static", "--cflags-only-other", package]:
+            return cflags(package, other=True)
+        case ["--cflags", package]:
+            return cflags(package, I=True, other=True)
+        case ["--static", "--cflags", package]:
+            return cflags(package, I=True, other=True)
+
+    return 1, None
+
+
+argv = sys.argv[1:]
+return_code, msg = deal_with_it(argv)
+if msg is not None:
+    print(msg)
+
+with PKG_CONFIG_TRACE.open("a") as f:
+    f.write(f"{datetime.now()} {return_code} {argv=}\t{msg=}\n")
+
+sys.exit(return_code)
