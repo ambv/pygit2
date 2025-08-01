@@ -50,8 +50,17 @@ elif [ "$BUILD_TARGET" == "simulator" ]; then
     export OPENSSL_SOURCE="/Users/ambv/Python/beeware-cpython-apple-source-deps/openssl-3.0.16-2-iphonesimulator.arm64"
     export CIBW_BUILD="cp*-${CIBW_PLATFORM}_${ARCH}_${SDK}"
     export CIBW_ARCHS="${ARCH}_${SDK}"
+elif [ "$BUILD_TARGET" == "iphone" ]; then
+    export SDK="iphoneos"
+    export GNU_ARCH="aarch64"
+    export MACOSX_DEPLOYMENT_TARGET=13.0
+    export CIBW_PLATFORM="ios"
+    export CMAKE_SYSTEM_NAME="iOS"
+    export OPENSSL_SOURCE="/Users/ambv/Python/beeware-cpython-apple-source-deps/openssl-3.0.16-2-iphoneos.arm64"
+    export CIBW_BUILD="cp*-${CIBW_PLATFORM}_${ARCH}_${SDK}"
+    export CIBW_ARCHS="${ARCH}_${SDK}"
 else
-    echo "Only 'macos' and 'simulator' target is currently supported"
+    echo "Only 'macos', 'simulator', and 'iphone' targets currently supported"
     exit 1
 fi
 
@@ -127,7 +136,7 @@ python3 -m venv "$BUILD_DIR/venv"
 source "$BUILD_DIR/venv/bin/activate"
 
 # Install cibuildwheel
-pip install --upgrade pip wheel cibuildwheel
+pip install --upgrade pip wheel delocate cibuildwheel
 
 # Set up environment for pygit2 build
 export LIBGIT2="$BUILD_DIR/libgit2"
@@ -137,17 +146,21 @@ export CFLAGS="-I$LIBGIT2_INCLUDE"
 export LDFLAGS="-L$LIBGIT2_LIB -lgit2"
 
 # Build the wheel with cibuildwheel
-echo "Building pygit2 wheel..."
+echo "Building pygit2 wheels..."
 
 # Export environment variables that cibuildwheel will pass to the build
 export CIBW_SKIP="cp38-* cp39-* cp310-* cp311-* cp312-* cp314t-* pp*"
 export CIBW_ENVIRONMENT="$CIBW_ENVIRONMENT LIBGIT2=$LIBGIT2 LIBGIT2_LIB=$LIBGIT2_LIB CFLAGS='$CFLAGS' LDFLAGS='$LDFLAGS'"
 export CIBW_BEFORE_ALL="unset PKG_CONFIG_PATH"
-export CIBW_BEFORE_BUILD="pip install --no-cache-dir --pre --find-links $TEMP_WHEELS_DEST cffi==2.0.0.dev0 && pip install wheel && pip install -r requirements.txt"
+export CIBW_BEFORE_BUILD="sh $PROJECT_DIR/misc/before-ios-cross-build.sh $PROJECT_DIR"
 export CIBW_REPAIR_WHEEL_COMMAND_MACOS="DYLD_LIBRARY_PATH=$LIBGIT2_LIB delocate-wheel -vv --require-archs {delocate_archs} -w {dest_dir} {wheel}"
 # Sadly no isolation because we need this $CIBW_BEFORE_BUILD dance to work in our build venv
 export CIBW_BUILD_FRONTEND="build; args: --no-isolation"
 
 cibuildwheel
+
+# Attempted to run delocate on iOS, but looks like this is not supported
+# cd $PROJECT_DIR
+# DYLD_LIBRARY_PATH=$LIBGIT2_LIB delocate-wheel -vv -w wheelhouse/ wheelhouse/*.whl
 
 echo "Build complete. Wheels are in the wheelhouse/ directory."
