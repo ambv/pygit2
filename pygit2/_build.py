@@ -53,6 +53,10 @@ def _get_libgit2_path():
 
 
 def get_libgit2_paths():
+    libgit2_framework = os.getenv('LIBGIT2_FRAMEWORK')
+    if libgit2_framework:
+        return Path(libgit2_framework), {}
+
     # Base path
     path = _get_libgit2_path()
 

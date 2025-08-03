@@ -145,22 +145,56 @@ export LIBGIT2_INCLUDE="$LIBGIT2/include"
 export CFLAGS="-I$LIBGIT2_INCLUDE"
 export LDFLAGS="-L$LIBGIT2_LIB -lgit2"
 
+# Convert libgit2 to a Framework for all platforms
+echo "Converting libgit2 to Framework..."
+
+# Create Frameworks directory
+FRAMEWORKS_DIR="$BUILD_DIR/Frameworks"
+mkdir -p "$FRAMEWORKS_DIR"
+
+# Convert libgit2.dylib to Framework
+sh "$PROJECT_DIR/misc/dylib-to-framework.sh" \
+    "$LIBGIT2_LIB/libgit2.1.9.dylib" \
+    "$FRAMEWORKS_DIR" \
+    "org.pygit2.libgit2"
+
+# Update environment to use the Framework
+export LIBGIT2_FRAMEWORK="$FRAMEWORKS_DIR/libgit2.1.9.framework"
+export LDFLAGS="-F$FRAMEWORKS_DIR -framework libgit2.1.9 -Wl,-rpath,@loader_path/../Frameworks"
+export CFLAGS="-I$LIBGIT2_INCLUDE"
+
+unset LIBGIT2
+unset LIBGIT2_LIB
+
 # Build the wheel with cibuildwheel
 echo "Building pygit2 wheels..."
 
 # Export environment variables that cibuildwheel will pass to the build
 export CIBW_SKIP="cp38-* cp39-* cp310-* cp311-* cp312-* cp314t-* pp*"
-export CIBW_ENVIRONMENT="$CIBW_ENVIRONMENT LIBGIT2=$LIBGIT2 LIBGIT2_LIB=$LIBGIT2_LIB CFLAGS='$CFLAGS' LDFLAGS='$LDFLAGS'"
+export CIBW_ENVIRONMENT="$CIBW_ENVIRONMENT LIBGIT2_FRAMEWORK=$LIBGIT2_FRAMEWORK CFLAGS='$CFLAGS' LDFLAGS='$LDFLAGS'"
 export CIBW_BEFORE_ALL="unset PKG_CONFIG_PATH"
 export CIBW_BEFORE_BUILD="sh $PROJECT_DIR/misc/before-ios-cross-build.sh $PROJECT_DIR"
-export CIBW_REPAIR_WHEEL_COMMAND_MACOS="DYLD_LIBRARY_PATH=$LIBGIT2_LIB delocate-wheel -vv --require-archs {delocate_archs} -w {dest_dir} {wheel}"
+export CIBW_REPAIR_WHEEL_COMMAND_MACOS="delocate-wheel -vv --ignore-missing --require-archs {delocate_archs} -w {dest_dir} {wheel}"
+
 # Sadly no isolation because we need this $CIBW_BEFORE_BUILD dance to work in our build venv
 export CIBW_BUILD_FRONTEND="build; args: --no-isolation"
 
 cibuildwheel
 
-# Attempted to run delocate on iOS, but looks like this is not supported
-# cd $PROJECT_DIR
-# DYLD_LIBRARY_PATH=$LIBGIT2_LIB delocate-wheel -vv -w wheelhouse/ wheelhouse/*.whl
+# Create xcarchive for the libgit2 Framework
+echo "Creating xcarchive for libgit2 Framework..."
+PLATFORM_NAME=""
+if [ "$BUILD_TARGET" == "macos" ]; then
+    PLATFORM_NAME="macos-$ARCH"
+elif [ "$BUILD_TARGET" == "simulator" ]; then
+    PLATFORM_NAME="ios-$ARCH-simulator"
+elif [ "$BUILD_TARGET" == "iphone" ]; then
+    PLATFORM_NAME="ios-$ARCH"
+fi
 
-echo "Build complete. Wheels are in the wheelhouse/ directory."
+sh "$PROJECT_DIR/misc/create-xcarchive.sh" \
+    "$LIBGIT2_FRAMEWORK" \
+    "$PLATFORM_NAME" \
+    "$PROJECT_DIR/wheelhouse"
+
+echo "Build complete. Wheels and xcarchive are in the wheelhouse/ directory."
